@@ -190,7 +190,6 @@ func ipToString(data []byte) string {
 
 func lookupDomain(domainName string) (string, error) {
 	query := buildQuery(domainName, TYPE_A)
-	// fmt.Printf("query: %x\n", query)
 	conn, err := net.Dial("udp", "8.8.8.8:53")
 	if err != nil {
 		return "", fmt.Errorf("cannot connect to DNS: %w", err)
