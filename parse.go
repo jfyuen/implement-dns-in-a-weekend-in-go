@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"net"
+	"io"
 	"strings"
 )
 
@@ -66,7 +66,7 @@ func decodeName(r *bytes.Reader) ([]byte, error) {
 		if length&0b1100_0000 == 0b1100_0000 {
 			res, err := decodeCompressedName(length, r)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("cannot read decompressed name: %w", err)
 			}
 			parts = append(parts, string(res))
 			break
@@ -100,7 +100,7 @@ func decodeCompressedName(length byte, r *bytes.Reader) ([]byte, error) {
 	binary.Read(bytes.NewBuffer(pointerBytes[:]), binary.BigEndian, &pointer)
 
 	buf := make([]byte, r.Len()+len(pointerBytes))
-	if _, err := r.ReadAt(buf, int64(pointer)); err != nil {
+	if _, err := r.ReadAt(buf, int64(pointer)); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 
@@ -113,17 +113,27 @@ func parseDNSRecord(r *bytes.Reader) (DNSRecord, error) {
 	var err error
 	rec.name, err = decodeName(r)
 	if err != nil {
-		return rec, err
+		return rec, fmt.Errorf("could not decode name: %w", err)
 	}
 	binary.Read(r, binary.BigEndian, &rec.type_)
 	binary.Read(r, binary.BigEndian, &rec.class)
 	binary.Read(r, binary.BigEndian, &rec.ttl)
 	var dataLen uint16
 	binary.Read(r, binary.BigEndian, &dataLen)
-	rec.data = make([]byte, dataLen)
-	_, err = r.Read(rec.data)
-	if err != nil {
-		return rec, err
+	if rec.type_ == TYPE_NS {
+		rec.data, err = decodeName(r)
+		if err != nil {
+			return rec, err
+		}
+	} else {
+		rec.data = make([]byte, dataLen)
+		_, err = r.Read(rec.data)
+		if err != nil {
+			return rec, err
+		}
+		if rec.type_ == TYPE_A {
+			rec.data = []byte(ipToString(rec.data))
+		}
 	}
 	return rec, nil
 }
@@ -186,27 +196,4 @@ func parseDNSPacket(data []byte) (DNSPacket, error) {
 
 func ipToString(data []byte) string {
 	return fmt.Sprintf("%d.%d.%d.%d", data[0], data[1], data[2], data[3])
-}
-
-func lookupDomain(domainName string) (string, error) {
-	query := buildQuery(domainName, TYPE_A)
-	conn, err := net.Dial("udp", "8.8.8.8:53")
-	if err != nil {
-		return "", fmt.Errorf("cannot connect to DNS: %w", err)
-	}
-	defer conn.Close()
-	_, err = conn.Write(query)
-	if err != nil {
-		return "", fmt.Errorf("cannot write to connection: %w", err)
-	}
-	p := make([]byte, 1024)
-	n, err := bufio.NewReader(conn).Read(p)
-	if err != nil {
-		return "", fmt.Errorf("cannot read from connection: %w", err)
-	}
-	packet, err := parseDNSPacket(p[:n])
-	if err != nil {
-		return "", fmt.Errorf("cannot parse DNSPacket: %w", err)
-	}
-	return ipToString(packet.answers[0].data), nil
 }

@@ -57,13 +57,14 @@ func encodeDNSName(s string) []byte {
 }
 
 const TYPE_A = 1
+const TYPE_NS = 2
 const CLASS_IN = 1
 
 func buildQuery(domainName string, recordType uint16) []byte {
 	name := encodeDNSName(domainName)
 	var id uint16 = uint16(rand.Intn(65535))
-	const RECURSION_DESIRED uint16 = 1 << 8
-	header := DNSHeader{id: id, numQuestions: 1, flags: RECURSION_DESIRED}
+	// const RECURSION_DESIRED uint16 = 1 << 8
+	header := DNSHeader{id: id, numQuestions: 1, flags: 0}
 	question := DNSQuestion{name: name, type_: recordType, class: CLASS_IN}
 	b := bytes.Buffer{}
 	r := bufio.NewWriter(&b)
